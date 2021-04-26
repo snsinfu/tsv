@@ -38,23 +38,6 @@
 #include <vector>
 
 
-// Macro used to probe structure fields.
-
-#define TSV_REPEAT_FOR_FIELDS(CLAUSE, X) \
-    CLAUSE(1, X(1)) \
-    CLAUSE(2, X(1), X(2)) \
-    CLAUSE(3, X(1), X(2), X(3)) \
-    CLAUSE(4, X(1), X(2), X(3), X(4)) \
-    CLAUSE(5, X(1), X(2), X(3), X(4), X(5)) \
-    CLAUSE(6, X(1), X(2), X(3), X(4), X(5), X(6)) \
-    CLAUSE(7, X(1), X(2), X(3), X(4), X(5), X(6), X(7)) \
-    CLAUSE(8, X(1), X(2), X(3), X(4), X(5), X(6), X(7), X(8)) \
-    CLAUSE(9, X(1), X(2), X(3), X(4), X(5), X(6), X(7), X(8), X(9)) \
-    CLAUSE(10, X(1), X(2), X(3), X(4), X(5), X(6), X(7), X(8), X(9), X(10))
-
-#define TSV_MAX_FIELDS 10
-
-
 namespace tsv
 {
     /**
@@ -213,92 +196,109 @@ namespace tsv
 
 namespace tsv::detail
 {
-
-    /**
-     * Dummy class used for ordering SFINAE overloads.
-     *
-     * We probe a structure type with aggregate initialization using varying
-     * number of fields in the initializer. However, the probing is not
-     * sufficient to determine the number of fields. For example, if R is
-     * a structure of three fields, `R{a}`, `R{a,b}` and `R{a,b,c}` are
-     * all valid initializations. We would like to order probes so that
-     * `R{a,b,c}` is preferred. To that end, we exploit an order induced
-     * by upcasting of a class object in function arguments.
-     */
-    template<std::size_t N>
-    class rank : public rank<N - 1> {};
-
-    template<>
-    class rank<0> {};
-
-    using max_rank = rank<TSV_MAX_FIELDS>;
-
-    /**
-     * Dummy convertible-to-anything type used to probe structure fields.
-     */
+    /** Dummy convertible-to-anything type used to probe structure fields. */
     struct any
     {
         template<typename T>
         operator T() const;
     };
 
-    // Generate probe() function overloads.
-
-#define CLAUSE(N, ...)                                        \
-    template<typename R, typename = decltype(R{__VA_ARGS__})> \
-    std::integral_constant<std::size_t, N> probe(detail::rank<N> const&);
-#define X(I) detail::any{}
-
-    TSV_REPEAT_FOR_FIELDS(CLAUSE, X)
-
-#undef CLAUSE
-#undef X
-
     /**
-     * Detects the number of fields in an aggregate structure.
+     * Detects the number of fields in an aggregate structure Record.
+     *
+     * The second parameter is `std::void_t` probing an aggregate initializer.
+     * The third parameter is the type list of the initializers.
      */
+    template<typename Record, typename = void, typename... Inits>
+    struct record_size
+    {
+        static constexpr std::size_t value = 0;
+    };
+
+    template<typename Record, typename... Inits>
+    struct record_size<
+        Record,
+        std::void_t<decltype(Record{any{}, Inits{}...})>,
+        Inits...
+    >
+    {
+        static constexpr std::size_t value =
+            record_size<Record, void, any, Inits...>::value + 1;
+    };
+
+    /** Detects the number of fields in an aggregate structure. */
     template<typename Record>
-    using record_size = decltype(detail::probe<Record>(detail::max_rank{}));
+    inline constexpr std::size_t record_size_v = record_size<Record>::value;
 }
 
 // Structure decomposition
 
 namespace tsv::detail
 {
-    /**
-     * A dummy type to hold a template type list.
-     */
+    /** A dummy type to hold a template type list. */
     template<typename...>
     struct type_list {};
 
     template<typename... Ts>
-    detail::type_list<Ts...> type_list_of(Ts const&...);
+    type_list<Ts...> type_list_of(Ts const&...);
 
-    // Generate decompose() function overloads.
+    template<std::size_t N>
+    using size = std::integral_constant<std::size_t, N>;
 
-#define CLAUSE(N, ...)                                                      \
-    template<typename R>                                                    \
-    auto decompose(R const& record, std::integral_constant<std::size_t, N>) \
-    {                                                                       \
-        auto [__VA_ARGS__] = record;                                        \
-        return detail::type_list_of(__VA_ARGS__);                           \
+    /** Returns a type_list of the fields of a structure. */
+    template<typename Record>
+    auto splat(Record const&, size<0>)
+    {
+        return type_list<>{};
     }
-#define X(I) a##I
 
-        TSV_REPEAT_FOR_FIELDS(CLAUSE, X)
+#define TSV_SPLAT(N, ...)                       \
+    template<typename Record>                   \
+    auto splat(Record const& record, size<N>)   \
+    {                                           \
+        auto [__VA_ARGS__] = record;            \
+        return type_list_of(__VA_ARGS__);       \
+    }
 
-#undef CLAUSE
-#undef X
+    TSV_SPLAT(1, a1)
+    TSV_SPLAT(2, a1, a2)
+    TSV_SPLAT(3, a1, a2, a3)
+    TSV_SPLAT(4, a1, a2, a3, a4)
+    TSV_SPLAT(5, a1, a2, a3, a4, a5)
+    TSV_SPLAT(6, a1, a2, a3, a4, a5, a6)
+    TSV_SPLAT(7, a1, a2, a3, a4, a5, a6, a7)
+    TSV_SPLAT(8, a1, a2, a3, a4, a5, a6, a7, a8)
+    TSV_SPLAT(9, a1, a2, a3, a4, a5, a6, a7, a8, a9)
+    TSV_SPLAT(10, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10)
+    TSV_SPLAT(11, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11)
+    TSV_SPLAT(12, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12)
+    TSV_SPLAT(13, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13)
+    TSV_SPLAT(14, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14)
+    TSV_SPLAT(15, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15)
+    TSV_SPLAT(16, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16)
+    TSV_SPLAT(17, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17)
+    TSV_SPLAT(18, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18)
+    TSV_SPLAT(19, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19)
+    TSV_SPLAT(20, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20)
+    TSV_SPLAT(21, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21)
+    TSV_SPLAT(22, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22)
+    TSV_SPLAT(23, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23)
+    TSV_SPLAT(24, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24)
+    TSV_SPLAT(25, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25)
+    TSV_SPLAT(26, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26)
+    TSV_SPLAT(27, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27)
+    TSV_SPLAT(28, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28)
+    TSV_SPLAT(29, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28, a29)
+    TSV_SPLAT(30, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28, a29, a30)
+    TSV_SPLAT(31, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28, a29, a30, a31)
+    TSV_SPLAT(32, a1, a2, a3, a4, a5, a6, a7, a8, a9, a10, a11, a12, a13, a14, a15, a16, a17, a18, a19, a20, a21, a22, a23, a24, a25, a26, a27, a28, a29, a30, a31, a32)
 
-    /**
-     * Returns a `type_list` of the non-static member variables in an
-     * aggregate structure.
-     */
+#undef TSV_SPLAT
+
+    /** Returns a type_list of the fields of an aggregate structure. */
     template<typename Record>
     using field_type_list = decltype(
-        detail::decompose(
-            std::declval<Record>(), detail::record_size<Record>{}
-        )
+        splat(std::declval<Record>(), size<record_size_v<Record>>{})
     );
 }
 
@@ -413,10 +413,9 @@ namespace tsv::detail
      * Parses a value of type T from a string.
      */
     template<typename T>
-    T parse(std::string_view text)
+    inline T parse(std::string_view text)
     {
-        tsv::conversion<T> conv;
-        return conv.parse(text);
+        return tsv::conversion<T>::parse(text);
     }
 
     /**
@@ -470,9 +469,7 @@ namespace tsv::detail
 
 namespace tsv::detail
 {
-    /**
-     * Validates the values assigned to the fields of a record.
-     */
+    /** Validates the values assigned to the fields of a record. */
     template<
         typename Record,
         typename = decltype(std::declval<Record&>().validate())
@@ -519,7 +516,5 @@ namespace tsv
         return records;
     }
 }
-
-#undef TSV_REPEAT_FOR_FIELDS
 
 #endif

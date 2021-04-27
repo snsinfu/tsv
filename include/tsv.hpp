@@ -29,6 +29,7 @@
 #include <charconv>
 #include <cstddef>
 #include <istream>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -57,27 +58,31 @@ namespace tsv
     }
 
     /**
-     * Base class for reporting an error when parsing an input.
+     * Traits class for customizing how values of type T are parsed. Default
+     * implementations for string, char and numeric types are defined in this
+     * library.
      */
+    template<typename T>
+    struct conversion;
+
+    /** Base class for reporting an error on parsing an input. */
     class error : public std::runtime_error
     {
     public:
         using std::runtime_error::runtime_error;
 
-        /**
-         * Content of the line that caused the error, if available.
-         */
+        /** Content of the line where the error has occured, if available. */
         std::string line;
 
         /**
-         * 1-based line number in an input where the error is occured. This is
+         * 1-based line number in an input where the error has occured. This is
          * set to zero if a line number is not available.
          */
         std::size_t line_number = 0;
 
         /**
          * Describes the error in detail. This function allocates memory and
-         * thus can throw an exception.
+         * thus can throw an exception in an out-of-memory case.
          */
         std::string describe() const
         {
@@ -99,9 +104,7 @@ namespace tsv
         }
     };
 
-    /**
-     * An exception thrown when an input line has unexpected number of fields.
-     */
+    /** An exception thrown when an input line has unexpected number of fields. */
     class format_error : public tsv::error
     {
     public:
@@ -113,9 +116,7 @@ namespace tsv
             "excess fields";
     };
 
-    /**
-     * An exception thrown when a text is not parseable as a value.
-     */
+    /** An exception thrown when a text is not parseable as a value. */
     class parse_error : public tsv::error
     {
     public:
@@ -129,9 +130,7 @@ namespace tsv
             "excess character(s) at the end of a field";
     };
 
-    /**
-     * An exception thrown when reading from an input fails.
-     */
+    /** An exception thrown when reading from an input fails. */
     class io_error : public tsv::error
     {
     public:
@@ -141,9 +140,7 @@ namespace tsv
             "input error";
     };
 
-    /**
-     * An exception thrown when validation fails on a record.
-     */
+    /** An exception thrown when validation fails on a record. */
     class validation_error : public tsv::error
     {
     public:
@@ -184,15 +181,9 @@ namespace tsv
             throw tsv::validation_error{message};
         }
     }
-
-    /**
-     * Traits class for customizing how values of type T are parsed.
-     */
-    template<typename T>
-    struct conversion;
 }
 
-// Structure member counting
+// STRUCTURE REFLECTION ------------------------------------------------------
 
 namespace tsv::detail
 {
@@ -204,7 +195,7 @@ namespace tsv::detail
     };
 
     /**
-     * Detects the number of fields in an aggregate structure Record.
+     * Traits for detecting the number of fields in an aggregate structure.
      *
      * The second parameter is `std::void_t` probing an aggregate initializer.
      * The third parameter is the type list of the initializers.
@@ -218,46 +209,44 @@ namespace tsv::detail
     template<typename Record, typename... Inits>
     struct record_size<
         Record,
-        std::void_t<decltype(Record{any{}, Inits{}...})>,
+        std::void_t<decltype(Record{detail::any{}, Inits{}...})>,
         Inits...
     >
     {
         static constexpr std::size_t value =
-            record_size<Record, void, any, Inits...>::value + 1;
+            record_size<Record, void, detail::any, Inits...>::value + 1;
     };
 
     /** Detects the number of fields in an aggregate structure. */
     template<typename Record>
-    inline constexpr std::size_t record_size_v = record_size<Record>::value;
-}
+    inline constexpr std::size_t record_size_v = detail::record_size<Record>::value;
 
-// Structure decomposition
-
-namespace tsv::detail
-{
     /** A dummy type to hold a template type list. */
     template<typename...>
     struct type_list {};
 
+    /** Creates type_list from values. */
     template<typename... Ts>
-    type_list<Ts...> type_list_of(Ts const&...);
+    detail::type_list<Ts...> type_list_of(Ts const&...);
 
     template<std::size_t N>
     using size = std::integral_constant<std::size_t, N>;
 
-    /** Returns a type_list of the fields of a structure. */
+    /** Returns the type_list of the fields of a structure. */
     template<typename Record>
-    auto splat(Record const&, size<0>)
+    auto splat(Record const&, detail::size<0>)
     {
-        return type_list<>{};
+        return detail::type_list<>{};
     }
 
-#define TSV_SPLAT(N, ...)                       \
-    template<typename Record>                   \
-    auto splat(Record const& record, size<N>)   \
-    {                                           \
-        auto [__VA_ARGS__] = record;            \
-        return type_list_of(__VA_ARGS__);       \
+    // Generate overloads for hard-coded number of fields.
+
+#define TSV_SPLAT(N, ...)                               \
+    template<typename Record>                           \
+    auto splat(Record const& record, detail::size<N>)   \
+    {                                                   \
+        auto [__VA_ARGS__] = record;                    \
+        return detail::type_list_of(__VA_ARGS__);       \
     }
 
     TSV_SPLAT(1, a1)
@@ -298,19 +287,22 @@ namespace tsv::detail
     /** Returns a type_list of the fields of an aggregate structure. */
     template<typename Record>
     using field_type_list = decltype(
-        splat(std::declval<Record>(), size<record_size_v<Record>>{})
+        detail::splat(
+            std::declval<Record>(),
+            detail::size<detail::record_size_v<Record>>{}
+        )
     );
 }
 
+// CONVERSION ----------------------------------------------------------------
+
 namespace tsv::detail
 {
-    // Basic value parsing
-
     /**
-     * Default implementation for tsv::conversion traits defined below.
+     * Default implementation for the tsv::conversion traits.
      *
-     * Fallback uses stream input operator to read a value of type T from
-     * a stringstream. This is slow.
+     * This fallback definition uses the stream input operator (>>) to read a
+     * value from a stringstream. This is slow.
      */
     template<typename T, typename = void>
     struct default_conversion
@@ -335,10 +327,7 @@ namespace tsv::detail
         }
     };
 
-    /**
-     * An optimized implementation of `default_conversion` for numeric
-     * types T.
-     */
+    /** An optimized implementation for numeric types using std::from_chars. */
     template<typename T>
     struct default_conversion<
         T,
@@ -371,9 +360,7 @@ namespace tsv::detail
         }
     };
 
-    /**
-     * Single-character token.
-     */
+    /** Single-character token. */
     template<>
     struct default_conversion<char, void>
     {
@@ -386,9 +373,7 @@ namespace tsv::detail
         }
     };
 
-    /**
-     * String token.
-     */
+    /** String token. */
     template<>
     struct default_conversion<std::string, void>
     {
@@ -405,21 +390,22 @@ namespace tsv
     struct conversion : detail::default_conversion<T> {};
 }
 
-// Parsing
+// PARSER --------------------------------------------------------------------
 
 namespace tsv::detail
 {
     /**
-     * Parses a value of type T from a string.
+     * Parses a value of type T from a string. Actual parsing is done by the
+     * tsv::conversion trait.
      */
     template<typename T>
-    inline T parse(std::string_view text)
+    T parse(std::string_view text)
     {
         return tsv::conversion<T>::parse(text);
     }
 
     /**
-     * Splits a string and consumes the splitted part.
+     * Splits a string at a delimiter and consumes the first part.
      *
      * @param text  String to split. The string will be trimmed up to the
      *   first occurrence of the delimiter (or the end).
@@ -463,24 +449,191 @@ namespace tsv::detail
         }
         return record;
     }
+
+    /** Class for reading lines from a stream with one-line lookahead. */
+    class line_reader
+    {
+    public:
+        explicit line_reader(std::istream& input)
+            : _input{input}
+        {
+        }
+
+        /**
+         * Reads next line. Returns a view of the internal buffer containing
+         * the content of the line, or nothing on reaching EOF.
+         */
+        std::optional<std::string_view> consume()
+        {
+            if (!ensure_line()) {
+                return std::nullopt;
+            }
+            _available = false;
+            return _line;
+        }
+
+        /**
+         * Looks next line ahead. Returns a view of the internal buffer
+         * containing the content of the line, or nothing on reaching EOF.
+         */
+        std::optional<std::string_view> peek()
+        {
+            if (!ensure_line()) {
+                return std::nullopt;
+            }
+            return _line;
+        }
+
+        /**
+         * Returns the current line number (one-based). Returns zero if any
+         * line has not been read yet.
+         */
+        std::size_t line_number() const
+        {
+            return _line_number;
+        }
+
+    private:
+        /**
+         * Ensures that `_line` contains the content of the next line. It does
+         * not read from the stream if `_line` is already filled by a previous
+         * lookahead. Returns true on success, or false on reaching EOF.
+         */
+        bool ensure_line()
+        {
+            if (_available) {
+                return true;
+            }
+
+            if (!std::getline(_input, _line)) {
+                if (_input.eof()) {
+                    return false;
+                }
+                throw tsv::io_error{tsv::io_error::unknown};
+            }
+
+            _line_number++;
+            _available = true;
+
+            return true;
+        }
+
+    private:
+        std::istream& _input;
+        std::string _line;
+        std::size_t _line_number = 0;
+        bool _available = false;
+    };
+
+    /** Checks if a text starts with a given prefix. */
+    inline bool starts_with(std::string_view text, std::string_view prefix)
+    {
+        return text.size() >= prefix.size() &&
+            text.substr(0, prefix.size()) == prefix;
+    }
+
+    /** Class for incrementally reading TSV rows from a stream. */
+    class parser
+    {
+    public:
+        /** Constructs a TSV parser with given input and delimiter. */
+        explicit parser(std::istream& input, char delim)
+            : _source{input}, _delim{delim}
+        {
+        }
+
+        /** Skips comment and empty lines, if any. */
+        void skip_comment(std::string_view prefix)
+        {
+            for (;;) {
+                std::string_view line;
+
+                if (auto maybe_line = _source.peek()) {
+                    line = *maybe_line;
+                } else {
+                    break;
+                }
+
+                if (line.empty() || (!prefix.empty() && detail::starts_with(line, prefix))) {
+                    _source.consume();
+                } else {
+                    break;
+                }
+            }
+        }
+
+        /**
+         * Parses the next line as textual fields. The fields are appended to
+         * the end of the vector. Returns true on success or false on reaching
+         * EOF.
+         */
+        bool parse_fields(std::vector<std::string>& fields)
+        {
+            std::string_view line;
+
+            if (auto maybe_line = _source.consume()) {
+                line = *maybe_line;
+            } else {
+                return false;
+            }
+
+            for (auto remain = line; !remain.empty(); ) {
+                fields.push_back(std::string{detail::split_consume(remain, _delim)});
+            }
+
+            return true;
+        }
+
+        /**
+         * Parses the next line as a structure. The fields are parsed and
+         * assigned to the members of the given structure object. Returns true
+         * on success or false on reaching EOF.
+         */
+        template<typename Record>
+        bool parse_record(Record& record)
+        {
+            std::string_view line;
+
+            if (auto maybe_line = _source.consume()) {
+                line = *maybe_line;
+            } else {
+                return false;
+            }
+
+            try {
+                detail::field_type_list<Record> field_types;
+                record = detail::parse_record<Record>(line, field_types);
+            } catch (tsv::error& err) {
+                err.line = line;
+                err.line_number = _source.line_number();
+                throw;
+            }
+
+            return true;
+        }
+
+    private:
+        detail::line_reader _source;
+        char const _delim;
+    };
 }
 
-// Validation
+// VALIDATION ----------------------------------------------------------------
 
 namespace tsv::detail
 {
     /** Validates the values assigned to the fields of a record. */
     template<
         typename Record,
-        typename = decltype(std::declval<Record&>().validate())
+        typename = decltype(std::declval<Record const&>().validate())
     >
-    void validate(Record& record)
+    void validate(Record const& record)
     {
         record.validate();
     }
 
     template<typename Record, typename... Dummy>
-    void validate(Record&, Dummy...)
+    void validate(Record const&, Dummy...)
     {
     }
 }
@@ -490,27 +643,18 @@ namespace tsv
     template<typename Record>
     std::vector<Record> load(std::istream& input)
     {
+        constexpr char delim = '\t';
+
         std::vector<Record> records;
-        std::string line;
-        std::size_t line_number = 0;
+        detail::parser parser{input, delim};
 
-        try {
-            detail::field_type_list<Record> field_types;
-
-            while (std::getline(input, line)) {
-                line_number++;
-                auto record = detail::parse_record<Record>(line, field_types);
-                detail::validate(record);
-                records.push_back(std::move(record));
+        for (;;) {
+            Record record;
+            if (!parser.parse_record<Record>(record)) {
+                break;
             }
-
-            if (!input.eof()) {
-                throw tsv::io_error{tsv::io_error::unknown};
-            }
-        } catch (tsv::error& err) {
-            err.line = std::move(line);
-            err.line_number = line_number;
-            throw;
+            detail::validate(record);
+            records.push_back(std::move(record));
         }
 
         return records;

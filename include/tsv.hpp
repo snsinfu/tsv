@@ -659,7 +659,7 @@ namespace tsv
         if (opts.header) {
             std::vector<std::string> header;
             if (!parser.parse_fields(header)) {
-                throw tsv::format_error::missing_header;
+                throw tsv::format_error{tsv::format_error::missing_header};
             }
         }
 

@@ -44,6 +44,9 @@ namespace tsv
     /** Holds options to control how a TSV input is handled. */
     struct options
     {
+        /** A character used to split fields. */
+        char delimiter = '\t';
+
         /** True to skip the first non-comment line. */
         bool header = true;
 
@@ -448,14 +451,14 @@ namespace tsv::detail
     }
 
     /**
-     * Parses a structure out of a tab-delimited text string. Record is the
-     * type of the structure to return and Ts... is the list of field types.
+     * Parses a structure out of a delimited text string. Record is the type of
+     * the structure to return and Ts... is the list of field types.
      */
     template<typename Record, typename... Ts>
-    Record parse_record(std::string_view text, detail::type_list<Ts...>)
+    Record parse_record(std::string_view text, char delim, detail::type_list<Ts...>)
     {
         Record record = {
-            detail::parse<Ts>(detail::split_consume(text, '\t'))...
+            detail::parse<Ts>(detail::split_consume(text, delim))...
         };
         if (!text.empty()) {
             throw tsv::format_error{tsv::format_error::excess_field};
@@ -608,7 +611,7 @@ namespace tsv::detail
 
             try {
                 detail::field_type_list<Record> field_types;
-                record = detail::parse_record<Record>(line, field_types);
+                record = detail::parse_record<Record>(line, _delim, field_types);
             } catch (tsv::error& err) {
                 err.line = line;
                 err.line_number = _source.line_number();
@@ -649,10 +652,8 @@ namespace tsv
     template<typename Record>
     std::vector<Record> load(std::istream& input, tsv::options const& opts)
     {
-        constexpr char delim = '\t';
-
         std::vector<Record> records;
-        detail::parser parser{input, delim};
+        detail::parser parser{input, opts.delimiter};
 
         parser.skip_comment(opts.comment);
 

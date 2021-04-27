@@ -41,20 +41,31 @@
 
 namespace tsv
 {
+    /** Holds options to control how a TSV input is handled. */
+    struct options
+    {
+        /** True to skip the first non-comment line. */
+        bool header = true;
+
+        /** Lines starting with this character are skipped. */
+        char comment = 0;
+    };
+
     /**
      * Loads tab-separated values from each line of an input.
      *
      * @param input is a stream containing a tab-separated document.
+     * @param opts control how the parser behaves.
      *
      * @returns A vector of loaded records.
      */
     template<typename Record>
-    std::vector<Record> load(std::istream& input);
+    std::vector<Record> load(std::istream& input, tsv::options const& opts = {});
 
     template<typename Record>
-    std::vector<Record> load(std::istream&& input)
+    std::vector<Record> load(std::istream&& input, tsv::options const& opts = {})
     {
-        return tsv::load<Record>(input);
+        return tsv::load<Record>(input, opts);
     }
 
     /**
@@ -110,6 +121,8 @@ namespace tsv
     public:
         using tsv::error::error;
 
+        static inline char const* const missing_header =
+            "header is expected but not seen";
         static inline char const* const missing_field =
             "insufficient number of fields";
         static inline char const* const excess_field =
@@ -525,13 +538,6 @@ namespace tsv::detail
         bool _available = false;
     };
 
-    /** Checks if a text starts with a given prefix. */
-    inline bool starts_with(std::string_view text, std::string_view prefix)
-    {
-        return text.size() >= prefix.size() &&
-            text.substr(0, prefix.size()) == prefix;
-    }
-
     /** Class for incrementally reading TSV rows from a stream. */
     class parser
     {
@@ -543,7 +549,7 @@ namespace tsv::detail
         }
 
         /** Skips comment and empty lines, if any. */
-        void skip_comment(std::string_view prefix)
+        void skip_comment(char prefix)
         {
             for (;;) {
                 std::string_view line;
@@ -554,7 +560,7 @@ namespace tsv::detail
                     break;
                 }
 
-                if (line.empty() || (!prefix.empty() && detail::starts_with(line, prefix))) {
+                if (line.empty() || line.front() == prefix) {
                     _source.consume();
                 } else {
                     break;
@@ -641,19 +647,31 @@ namespace tsv::detail
 namespace tsv
 {
     template<typename Record>
-    std::vector<Record> load(std::istream& input)
+    std::vector<Record> load(std::istream& input, tsv::options const& opts)
     {
         constexpr char delim = '\t';
 
         std::vector<Record> records;
         detail::parser parser{input, delim};
 
+        parser.skip_comment(opts.comment);
+
+        if (opts.header) {
+            std::vector<std::string> header;
+            if (!parser.parse_fields(header)) {
+                throw tsv::format_error::missing_header;
+            }
+        }
+
         for (;;) {
+            parser.skip_comment(opts.comment);
+
             Record record;
             if (!parser.parse_record<Record>(record)) {
                 break;
             }
             detail::validate(record);
+
             records.push_back(std::move(record));
         }
 

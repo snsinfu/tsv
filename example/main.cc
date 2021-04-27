@@ -14,7 +14,10 @@ struct record
 int main()
 {
     try {
-        auto const records = tsv::load<record>(std::ifstream{"input.tsv"});
+        auto const records = tsv::load<record>(
+            std::ifstream{"input.tsv"},
+            {.header = false, .comment = '#'}
+        );
         std::cout << records.size() << " records\n";
     } catch (tsv::error const& err) {
         std::cerr << "error: " << err.describe() << '\n';

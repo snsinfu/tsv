@@ -243,7 +243,10 @@ namespace tsv::detail
 
     /** Creates type_list from values. */
     template<typename... Ts>
-    detail::type_list<Ts...> type_list_of(Ts const&...);
+    detail::type_list<Ts...> type_list_of(Ts const&...)
+    {
+        return {};
+    }
 
     template<std::size_t N>
     using size = std::integral_constant<std::size_t, N>;
@@ -331,7 +334,7 @@ namespace tsv::detail
             T value;
             stream >> value;
 
-            if (stream.fail() && !stream.eof()) {
+            if (!stream) {
                 throw tsv::parse_error{tsv::parse_error::unknown};
             }
 

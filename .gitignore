@@ -1,0 +1,8 @@
+.*
+_*
+!.github
+!.gitignore
+
+*.o
+/tests/main
+/tests/main.*

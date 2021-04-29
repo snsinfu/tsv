@@ -224,7 +224,7 @@ TEST_CASE("parser::parse_record")
         tsv::detail::parser parser{source, '\t'};
 
         record_type record;
-        CHECK_FALSE(parser.parse_record<record_type>(record));
+        CHECK_FALSE(parser.parse_record(record));
     }
 
     SUBCASE("errors")

@@ -20,6 +20,7 @@ OBJECTS = \
 
 
 .PHONY: run clean
+.SUFFIXES: .cc
 
 run: main
 	@./main
@@ -29,3 +30,6 @@ clean:
 
 main: $(OBJECTS)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $@ $^
+
+.cc.o:
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<

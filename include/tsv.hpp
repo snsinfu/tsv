@@ -215,6 +215,8 @@ namespace tsv::detail
      *
      * The second parameter is `std::void_t` probing an aggregate initializer.
      * The third parameter is the type list of the initializers.
+     *
+     * See: https://gist.github.com/utilForever/1a058050b8af3ef46b58bcfa01d5375d
      */
     template<typename Record, typename = void, typename... Inits>
     struct record_size
@@ -222,6 +224,10 @@ namespace tsv::detail
         static constexpr std::size_t value = 0;
     };
 
+#ifdef __GNUC__
+#  pragma GCC diagnostic push
+#  pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
     template<typename Record, typename... Inits>
     struct record_size<
         Record,
@@ -232,6 +238,9 @@ namespace tsv::detail
         static constexpr std::size_t value =
             record_size<Record, void, detail::any, Inits...>::value + 1;
     };
+#ifdef __GNUC__
+#  pragma GCC diagnostic pop
+#endif
 
     /** Detects the number of fields in an aggregate structure. */
     template<typename Record>
@@ -461,6 +470,7 @@ namespace tsv::detail
         // in `text` may be empty; e.g., text = "a|b|" with delim = '|'.
         bool exhausted = false;
 
+        [[maybe_unused]]
         auto consume_next = [&] {
             if (exhausted) {
                 throw tsv::format_error{tsv::format_error::missing_field};

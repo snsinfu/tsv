@@ -29,7 +29,7 @@ clean:
 	rm -f main $(OBJECTS)
 
 main: $(OBJECTS) Makefile
-	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $@ $^
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $@ $(OBJECTS)
 
 .cc.o:
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<

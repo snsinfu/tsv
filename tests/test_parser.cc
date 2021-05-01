@@ -258,6 +258,7 @@ TEST_CASE("parser::parse_record")
             tsv::detail::parser parser{source, '\t'};
 
             record_type record;
+            INFO("source = \"", example, "\"");
             CHECK_THROWS_AS(parser.parse_record(record), tsv::error);
         }
     }

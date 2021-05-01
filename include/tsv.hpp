@@ -437,10 +437,6 @@ namespace tsv::detail
     inline
     std::string_view split_consume(std::string_view& text, char delim)
     {
-        if (text.empty()) {
-            throw tsv::format_error{tsv::format_error::missing_field};
-        }
-
         auto const pos = text.find(delim);
         if (pos != std::string_view::npos) {
             auto const token = text.substr(0, pos);
@@ -460,12 +456,25 @@ namespace tsv::detail
     template<typename Record, typename... Ts>
     Record parse_record(std::string_view text, char delim, detail::type_list<Ts...>)
     {
-        Record record = {
-            detail::parse<Ts>(detail::split_consume(text, delim))...
+        // This flag tracks whether all fields in the text have been consumed.
+        // We cannot use `text.empty()` for this purpose because the last field
+        // in `text` may be empty; e.g., text = "a|b|" with delim = '|'.
+        bool exhausted = false;
+
+        auto consume_next = [&] {
+            if (exhausted) {
+                throw tsv::format_error{tsv::format_error::missing_field};
+            }
+            auto const field = detail::split_consume(text, delim);
+            exhausted = (field.end() == text.end());
+            return field;
         };
-        if (!text.empty()) {
+
+        Record record = {detail::parse<Ts>(consume_next())...};
+        if (!exhausted) {
             throw tsv::format_error{tsv::format_error::excess_field};
         }
+
         return record;
     }
 
@@ -589,8 +598,12 @@ namespace tsv::detail
                 return false;
             }
 
-            for (auto remain = line; !remain.empty(); ) {
-                fields.push_back(std::string{detail::split_consume(remain, _delim)});
+            if (auto remain = line; !remain.empty()) {
+                std::string_view field;
+                do {
+                    field = detail::split_consume(remain, _delim);
+                    fields.push_back(std::string{field});
+                } while (field.end() != remain.end());
             }
 
             return true;

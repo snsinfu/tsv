@@ -28,8 +28,10 @@ run: main
 clean:
 	rm -f main $(OBJECTS)
 
-main: $(OBJECTS)
+main: $(OBJECTS) Makefile
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) $(LDFLAGS) -o $@ $^
 
 .cc.o:
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) -c -o $@ $<
+
+$(OBJECTS): ../include/tsv.hpp Makefile
